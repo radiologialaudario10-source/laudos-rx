@@ -1,128 +1,95 @@
 "use client";
 
-import dynamic from "next/dynamic";
-// PDF por template (client-only)
-const PdfReport = dynamic(() => import("./PdfReport"), { ssr: false });
-
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useForm, useFieldArray } from "react-hook-form";
+import { useEffect, useMemo } from "react";
+import { useForm, useFieldArray, type DefaultValues } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ctToraxSchema, CtToraxForm } from "@/models/ct_torax.schema";
+import { ctToraxSchema, type CtToraxForm } from "@/models/ct_torax.schema";
 import { saveDraft, loadDraft, clearDraft } from "@/lib/storage";
+
+type Props = {
+  storageKey?: string;
+  fallback: CtToraxForm;
+};
 
 export default function ReportForm({
   storageKey = "draft_ct_torax_v2",
   fallback,
-}: {
-  storageKey?: string;
-  fallback: CtToraxForm;
-}) {
+}: Props) {
   const {
     register,
     control,
     handleSubmit,
     reset,
     watch,
-    formState: { errors, isValid },
+    formState: { errors, isValid, isSubmitting },
   } = useForm<CtToraxForm>({
     resolver: zodResolver(ctToraxSchema),
-    defaultValues: fallback as any,
+    defaultValues: fallback as DefaultValues<CtToraxForm>,
     mode: "onChange",
   });
 
-  const { fields, append, remove } = useFieldArray({ control, name: "findings" });
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: "findings",
+  });
 
-  // Carrega rascunho ao montar / trocar template
+  // carregar rascunho salvo (apenas no cliente)
   useEffect(() => {
-    const draft = loadDraft<CtToraxForm>(storageKey, fallback as any);
-    reset(draft);
+    const draft = loadDraft<CtToraxForm>(storageKey, fallback);
+    reset(draft as DefaultValues<CtToraxForm>);
   }, [reset, storageKey, fallback]);
 
-  // Salva rascunho a cada mudança
+  // salvar sempre que mudar
+  const formData = watch();
   useEffect(() => {
-    const sub = watch((val) => saveDraft(storageKey, val));
-    return () => sub.unsubscribe();
-  }, [watch, storageKey]);
+    saveDraft(storageKey, formData);
+  }, [formData, storageKey]);
 
-  // Narrativa para o preview
+  // narrativa do preview (sem 'any' e com dependência correta)
   const narrative = useMemo(() => {
-    const data = watch();
+    const d = formData;
+
     const lines: string[] = [];
-    lines.push(`Indicação: ${data.indication}`);
-    lines.push(`Técnica: ${data.technique.join(", ")}`);
-    data.findings.forEach((f, i) => {
-      const size = [f.size_mm.long, f.size_mm.short].filter(Boolean).join(" x ") || "—";
-      const extra = f.additional?.length ? `; adicionais: ${f.additional.join(", ")}` : "";
+    lines.push(`Indicação: ${d.indication || "—"}`);
+    lines.push(`Técnica: ${d.technique.join(", ") || "—"}`);
+
+    d.findings.forEach((f, i) => {
+      const size =
+        [f.size_mm.long, f.size_mm.short].filter(Boolean).join(" x ") || "—";
+      const extra =
+        f.additional?.length ? `; adicionais: ${f.additional.join(", ")}` : "";
       lines.push(
         `Achado ${i + 1}: ${f.type} em ${f.site}; margens ${f.margins}; densidade ${f.density}; medidas ${size}${extra}.`
       );
     });
-    if (data.ancillary?.length) lines.push(`Achados acessórios: ${data.ancillary.filter(Boolean).join(", ")}`);
-    if (data.comparison?.priorDate) lines.push(`Comparação: ${data.comparison.priorDate} → ${data.comparison.change}`);
-    if (data.impression?.length) lines.push(`Impressão: ${data.impression.filter(Boolean).join("; ")}`);
-    if (data.recommendations?.length) lines.push(`Recomendações: ${data.recommendations.filter(Boolean).join("; ")}`);
+
+    if (d.ancillary?.length) {
+      lines.push(`Achados acessórios: ${d.ancillary.filter(Boolean).join(", ")}`);
+    }
+    if (d.comparison?.priorDate) {
+      lines.push(
+        `Comparação: ${d.comparison.priorDate} → ${d.comparison.change}`
+      );
+    }
+    if (d.impression?.length) {
+      lines.push(`Impressão: ${d.impression.filter(Boolean).join("; ")}`);
+    }
+    if (d.recommendations?.length) {
+      lines.push(
+        `Recomendações: ${d.recommendations.filter(Boolean).join("; ")}`
+      );
+    }
     return lines.join("\n");
-  }, [watch()]);
+  }, [formData]);
 
   const onSubmit = (data: CtToraxForm) => {
     alert("Validação OK — pronto para salvar/baixar PDF.");
     console.log("Dados válidos:", data);
   };
 
-  // ---- DOWNLOAD DE PDF (react-pdf com fallback em html2pdf.js) ----
-  const [downloading, setDownloading] = useState(false);
-  const previewRef = useRef<HTMLDivElement | null>(null);
-
-  const handleDownloadPdf = async () => {
-    setDownloading(true);
-    try {
-      // 1) Tenta com @react-pdf/renderer
-      try {
-        const ReactPDF: any = await import("@react-pdf/renderer");
-        const pdfFn = ReactPDF?.pdf ?? ReactPDF?.default?.pdf;
-        if (typeof pdfFn === "function") {
-          const element = <PdfReport data={watch()} />;
-          const blob: Blob = await pdfFn(element).toBlob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `laudo-${(watch().patient?.id || "sem-id")}.pdf`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-          return; // sucesso -> sai
-        }
-        console.warn("react-pdf indisponível, usando fallback html2pdf.js");
-      } catch (e) {
-        console.warn("react-pdf falhou, usando fallback html2pdf.js", e);
-      }
-
-      // 2) Fallback robusto: html2pdf.js no DOM do preview
-      const html2pdf = (await import("html2pdf.js")).default;
-      if (!previewRef.current) throw new Error("preview não encontrado");
-      await html2pdf()
-        .from(previewRef.current)
-        .set({
-          margin: 10,
-          filename: `laudo-${(watch().patient?.id || "sem-id")}.pdf`,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-        })
-        .save();
-    } catch (e) {
-      console.error(e);
-      alert("Falha ao gerar PDF. Abra o console e me envie o erro que eu corrijo.");
-    } finally {
-      setDownloading(false);
-    }
-  };
-  // ---------------------------------------------------------------
-
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="grid md:grid-cols-2 gap-6">
-      {/* COLUNA ESQUERDA — FORMULÁRIO */}
+      {/* COLUNA ESQUERDA */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold">Dados do Paciente</h2>
@@ -131,7 +98,7 @@ export default function ReportForm({
             className="no-print px-3 py-2 rounded border"
             onClick={() => {
               clearDraft(storageKey);
-              reset(fallback as any);
+              reset(fallback as DefaultValues<CtToraxForm>);
             }}
           >
             Limpar
@@ -139,9 +106,21 @@ export default function ReportForm({
         </div>
 
         <div className="grid grid-cols-3 gap-2 mb-1">
-          <input className="border p-2 rounded" placeholder="Idade" {...register("patient.age")} />
-          <input className="border p-2 rounded" placeholder="Sexo" {...register("patient.sex")} />
-          <input className="border p-2 rounded" placeholder="ID" {...register("patient.id")} />
+          <input
+            className="border p-2 rounded"
+            placeholder="Idade"
+            {...register("patient.age")}
+          />
+          <input
+            className="border p-2 rounded"
+            placeholder="Sexo"
+            {...register("patient.sex")}
+          />
+          <input
+            className="border p-2 rounded"
+            placeholder="ID"
+            {...register("patient.id")}
+          />
         </div>
         {(errors.patient?.age || errors.patient?.sex) && (
           <p className="text-red-600 text-sm">
@@ -150,13 +129,23 @@ export default function ReportForm({
         )}
 
         <h2 className="font-semibold mt-4 mb-2">Indicação</h2>
-        <input className="border p-2 rounded w-full mb-1" placeholder="Motivo do exame" {...register("indication")} />
-        {errors.indication && <p className="text-red-600 text-sm">{errors.indication.message}</p>}
+        <input
+          className="border p-2 rounded w-full mb-1"
+          placeholder="Motivo do exame"
+          {...register("indication")}
+        />
+        {errors.indication && (
+          <p className="text-red-600 text-sm">{errors.indication.message}</p>
+        )}
 
         <h2 className="font-semibold mt-4 mb-2">Técnica</h2>
         <div className="flex gap-2 mb-4">
-          {watch("technique").map((_, i) => (
-            <input key={i} className="border p-2 rounded" {...register(`technique.${i}` as const)} />
+          {formData.technique.map((_, i) => (
+            <input
+              key={i}
+              className="border p-2 rounded"
+              {...register(`technique.${i}`)}
+            />
           ))}
         </div>
 
@@ -165,34 +154,61 @@ export default function ReportForm({
           {fields.map((f, i) => (
             <div key={f.id} className="border rounded p-3">
               <div className="grid md:grid-cols-2 gap-2">
-                <input className="border p-2 rounded" placeholder="Local" {...register(`findings.${i}.site` as const)} />
-                <input className="border p-2 rounded" placeholder="Tipo" {...register(`findings.${i}.type` as const)} />
+                <input
+                  className="border p-2 rounded"
+                  placeholder="Local"
+                  {...register(`findings.${i}.site`)}
+                />
+                <input
+                  className="border p-2 rounded"
+                  placeholder="Tipo"
+                  {...register(`findings.${i}.type`)}
+                />
                 <input
                   className="border p-2 rounded"
                   placeholder="Maior eixo (mm)"
-                  {...register(`findings.${i}.size_mm.long` as const)}
+                  {...register(`findings.${i}.size_mm.long`)}
                 />
                 <input
                   className="border p-2 rounded"
                   placeholder="Menor eixo (mm)"
-                  {...register(`findings.${i}.size_mm.short` as const)}
+                  {...register(`findings.${i}.size_mm.short`)}
                 />
-                <input className="border p-2 rounded" placeholder="Margens" {...register(`findings.${i}.margins` as const)} />
-                <input className="border p-2 rounded" placeholder="Densidade" {...register(`findings.${i}.density` as const)} />
+                <input
+                  className="border p-2 rounded"
+                  placeholder="Margens"
+                  {...register(`findings.${i}.margins`)}
+                />
+                <input
+                  className="border p-2 rounded"
+                  placeholder="Densidade"
+                  {...register(`findings.${i}.density`)}
+                />
               </div>
+
               <input
                 className="border p-2 rounded w-full mt-2"
-                placeholder="Adicionais (vírgula)"
-                {...register(`findings.${i}.additional` as const, {
-                  setValueAs: (v) => String(v).split(",").map((s) => s.trim()).filter(Boolean),
+                placeholder="Adicionais (separe por vírgula)"
+                {...register(`findings.${i}.additional`, {
+                  setValueAs: (v) =>
+                    String(v)
+                      .split(",")
+                      .map((s: string) => s.trim())
+                      .filter(Boolean),
                 })}
               />
-              <button type="button" className="mt-2 text-sm text-red-600" onClick={() => remove(i)}>
+
+              <button
+                type="button"
+                className="mt-2 text-sm text-red-600"
+                onClick={() => remove(i)}
+              >
                 Remover
               </button>
             </div>
           ))}
         </div>
+
         <button
           type="button"
           className="bg-gray-200 px-3 py-2 rounded mb-4"
@@ -230,7 +246,11 @@ export default function ReportForm({
           rows={3}
           placeholder="Impressão (separe por ;)"
           {...register("impression", {
-            setValueAs: (v) => String(v).split(";").map((s) => s.trim()).filter(Boolean),
+            setValueAs: (v) =>
+              String(v)
+                .split(";")
+                .map((s: string) => s.trim())
+                .filter(Boolean),
           })}
         />
         <textarea
@@ -238,48 +258,41 @@ export default function ReportForm({
           rows={3}
           placeholder="Recomendações (separe por ;)"
           {...register("recommendations", {
-            setValueAs: (v) => String(v).split(";").map((s) => s.trim()).filter(Boolean),
+            setValueAs: (v) =>
+              String(v)
+                .split(";")
+                .map((s: string) => s.trim())
+                .filter(Boolean),
           })}
         />
 
-        <button type="submit" className="mt-3 bg-black text-white px-4 py-2 rounded disabled:opacity-50" disabled={!isValid}>
+        <button
+          type="submit"
+          className="mt-3 bg-black text-white px-4 py-2 rounded disabled:opacity-50"
+          disabled={!isValid || isSubmitting}
+          title={!isValid ? "Preencha os campos obrigatórios" : undefined}
+        >
           Validar dados
         </button>
       </div>
 
-      {/* COLUNA DIREITA — PREVIEW + EXPORT */}
+      {/* COLUNA DIREITA — PREVIEW */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold">Pré-visualização</h2>
-
-          <div className="no-print flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={!isValid}
-              title={!isValid ? "Preencha os campos obrigatórios" : "Salvar como PDF (impressão)"}
-            >
-              Salvar como PDF
-            </button>
-
-            <button
-              type="button"
-              onClick={handleDownloadPdf}
-              className="px-3 py-2 rounded border hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={!isValid || downloading}
-              title={!isValid ? "Preencha os campos obrigatórios" : "Baixar PDF (Pro)"}
-            >
-              {downloading ? "Gerando..." : "Baixar PDF (Pro)"}
-            </button>
-          </div>
+          <button
+            type="button"
+            className="no-print bg-blue-600 text-white px-3 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => window.print()}
+            disabled={!isValid}
+            title={!isValid ? "Preencha os campos obrigatórios" : "Gerar PDF (impressão)"}
+          >
+            Salvar como PDF
+          </button>
         </div>
 
-        <div
-          ref={previewRef}
-          className="border rounded p-4 print:p-0 whitespace-pre-wrap bg-white min-h-[280px]"
-        >
-          <h3 className="font-bold mb-2">Laudo — {watch("studyArea") || "TC"}</h3>
+        <div className="border rounded p-4 print:p-0 whitespace-pre-wrap bg-white min-h-[280px]">
+          <h3 className="font-bold mb-2">Laudo — {formData.studyArea || "TC"}</h3>
           <pre className="text-sm leading-6">{narrative}</pre>
         </div>
       </div>
