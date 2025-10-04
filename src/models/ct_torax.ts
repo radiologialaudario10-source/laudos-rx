@@ -1,26 +1,24 @@
 // src/models/ct_torax.ts
 
-export interface Finding {
-  site: string;
-  type: string;
-  size_mm: { long: string; short: string };
-  margins: string;
-  density: string;
-  additional: string[];
-}
-
-export interface CtToraxData {
+export type CtToraxData = {
   modality: "CT";
   studyArea: "Thorax";
   patient: { age: string; sex: string; id: string };
   indication: string;
   technique: string[];
-  findings: Finding[];
+  findings: {
+    site: string;
+    type: string;
+    size_mm: { long: string; short: string };
+    margins: string;
+    density: string;
+    additional: string[];
+  }[];
   ancillary: string[];
   comparison: { priorDate: string; change: string };
   impression: string[];
   recommendations: string[];
-}
+};
 
 export const defaultCtTorax: CtToraxData = {
   modality: "CT",
