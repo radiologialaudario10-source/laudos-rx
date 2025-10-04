@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
+const PdfReport = dynamic(() => import("./PdfReport"), { ssr: false });
+
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm, useFieldArray, type DefaultValues } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ctToraxSchema, type CtToraxForm } from "@/models/ct_torax.schema";
@@ -86,6 +89,53 @@ export default function ReportForm({
     alert("Validação OK — pronto para salvar/baixar PDF.");
     console.log("Dados válidos:", data);
   };
+
+  // ---- DOWNLOAD DE PDF (react-pdf com fallback em html2pdf.js) ----
+  const [downloading, setDownloading] = useState(false);
+  const previewRef = useRef<HTMLDivElement | null>(null);
+
+  const handleDownloadPdf = async () => {
+    setDownloading(true);
+    try {
+      // 1) Tenta com @react-pdf/renderer (sem 'any')
+      try {
+        const ReactPDF = await import("@react-pdf/renderer");
+        const element = <PdfReport data={formData} />;
+        const blob: Blob = await ReactPDF.pdf(element).toBlob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `laudo-${(formData.patient?.id || "sem-id")}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return; // sucesso -> sai
+      } catch (e) {
+        console.warn("react-pdf indisponível, usando fallback html2pdf.js", e);
+      }
+
+      // 2) Fallback robusto: html2pdf.js no DOM do preview
+      const html2pdf = (await import("html2pdf.js")).default;
+      if (!previewRef.current) throw new Error("preview não encontrado");
+      await html2pdf()
+        .from(previewRef.current)
+        .set({
+          margin: 10,
+          filename: `laudo-${(formData.patient?.id || "sem-id")}.pdf`,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        })
+        .save();
+    } catch (e) {
+      console.error(e);
+      alert("Falha ao gerar PDF. Abra o console e me envie o erro que eu corrijo.");
+    } finally {
+      setDownloading(false);
+    }
+  };
+  // ---------------------------------------------------------------
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="grid md:grid-cols-2 gap-6">
@@ -276,22 +326,36 @@ export default function ReportForm({
         </button>
       </div>
 
-      {/* COLUNA DIREITA — PREVIEW */}
+      {/* COLUNA DIREITA — PREVIEW + EXPORT */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold">Pré-visualização</h2>
-          <button
-            type="button"
-            className="no-print bg-blue-600 text-white px-3 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => window.print()}
-            disabled={!isValid}
-            title={!isValid ? "Preencha os campos obrigatórios" : "Gerar PDF (impressão)"}
-          >
-            Salvar como PDF
-          </button>
+          <div className="no-print flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!isValid}
+              title={!isValid ? "Preencha os campos obrigatórios" : "Salvar como PDF (impressão)"}
+            >
+              Salvar como PDF
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              className="px-3 py-2 rounded border hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!isValid || downloading}
+              title={!isValid ? "Preencha os campos obrigatórios" : "Baixar PDF (Pro)"}
+            >
+              {downloading ? "Gerando..." : "Baixar PDF (Pro)"}
+            </button>
+          </div>
         </div>
 
-        <div className="border rounded p-4 print:p-0 whitespace-pre-wrap bg-white min-h-[280px]">
+        <div
+          ref={previewRef}
+          className="border rounded p-4 print:p-0 whitespace-pre-wrap bg-white min-h-[280px]"
+        >
           <h3 className="font-bold mb-2">Laudo — {formData.studyArea || "TC"}</h3>
           <pre className="text-sm leading-6">{narrative}</pre>
         </div>
