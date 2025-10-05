@@ -1,10 +1,8 @@
-// src/models/ct_torax.schema.ts
 import { z } from "zod";
 
 /**
- * Schema do formulário de TC de Tórax.
- * Observação: vários campos são opcionais no INPUT (para digitar livre),
- * e recebem defaults no parse (OUTPUT), quando fizer ctToraxSchema.parse(...).
+ * Schema de validação para o formulário de TC de Tórax.
+ * Ele define os campos, se são opcionais e as mensagens de erro.
  */
 export const ctToraxSchema = z.object({
   studyArea: z.string().optional(),
@@ -12,13 +10,11 @@ export const ctToraxSchema = z.object({
   patient: z.object({
     age: z.string().min(1, "Idade é obrigatória"),
     sex: z.string().min(1, "Sexo é obrigatório"),
-    id: z.string().optional(), // <- opcional no input
+    id: z.string().optional(),
   }),
 
   indication: z.string().min(1, "Indicação é obrigatória"),
-
   technique: z.array(z.string()).default([]),
-
   findings: z
     .array(
       z.object({
@@ -26,7 +22,7 @@ export const ctToraxSchema = z.object({
         type: z.string().default("Nódulo"),
         size_mm: z
           .object({
-            long: z.string().optional(), // <- opcionais no input
+            long: z.string().optional(),
             short: z.string().optional(),
           })
           .default({}),
@@ -38,20 +34,18 @@ export const ctToraxSchema = z.object({
     .default([]),
 
   ancillary: z.array(z.string()).default([]),
-
   comparison: z
     .object({
       priorDate: z.string().optional(),
       change: z.string().optional(),
     })
     .default({}),
-
   impression: z.array(z.string()).default([]),
   recommendations: z.array(z.string()).default([]),
 });
 
-// Tipo “de entrada” (o que o usuário digita; pode ter opcionais)
+// O tipo de DADOS DE ENTRADA do formulário (o que o usuário digita)
 export type CtToraxInput = z.input<typeof ctToraxSchema>;
 
-// Tipo “de saída” (depois do parse; defaults aplicados)
+// O tipo de DADOS DE SAÍDA após a validação (com defaults aplicados)
 export type CtToraxForm = z.infer<typeof ctToraxSchema>;

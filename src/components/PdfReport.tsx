@@ -1,109 +1,58 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { CtToraxForm } from "@/models/ct_torax.schema";
 
-/**
- * Vamos aceitar:
- *  - data: CtToraxForm
- *  - title (opcional) para o cabeçalho
- *  - e, se por acaso vier "studyArea" junto em data, usamos como fallback
- */
-type PdfData = CtToraxForm & { studyArea?: string };
-type Props = { data: PdfData; title?: string };
+type Props = { data: CtToraxForm };
 
 const styles = StyleSheet.create({
-  page: { padding: 24, fontSize: 12 },
-  h1: { fontSize: 16, marginBottom: 10 },
-  section: { marginBottom: 8 },
-  label: { fontWeight: 700 },
-  listItem: { marginBottom: 4 },
+  page: { padding: 24, fontSize: 11, lineHeight: 1.5 },
+  h1: { fontSize: 16, marginBottom: 12, fontWeight: "bold" },
+  section: { marginBottom: 10 },
+  label: { fontWeight: "bold" },
+  listItem: { marginBottom: 4, marginLeft: 10 },
 });
 
-export default function PdfReport({ data, title }: Props) {
-  const heading = title ?? data.studyArea ?? "TC";
+export default function PdfReport({ data }: Props) {
+  const title = `Laudo — ${data.studyArea ?? "Tomografia Computadorizada"}`;
+  const tecnica = data.technique?.join(", ") || "Não especificada";
 
   return (
     <Document>
       <Page size="A4" style={styles.page}>
-        <Text style={styles.h1}>Laudo — {heading}</Text>
+        <Text style={styles.h1}>{title}</Text>
 
         <View style={styles.section}>
-          <Text>
-            <Text style={styles.label}>Paciente ID: </Text>
-            {data.patient?.id || "—"}
-          </Text>
+          <Text><Text style={styles.label}>Paciente ID: </Text>{data.patient?.id || "N/A"}</Text>
+          <Text><Text style={styles.label}>Idade/Sexo: </Text>{`${data.patient?.age || "N/A"} / ${data.patient?.sex || "N/A"}`}</Text>
         </View>
 
         <View style={styles.section}>
-          <Text>
-            <Text style={styles.label}>Indicação: </Text>
-            {data.indication || "—"}
-          </Text>
+          <Text><Text style={styles.label}>Indicação: </Text>{data.indication || "N/A"}</Text>
+          <Text><Text style={styles.label}>Técnica: </Text>{tecnica}</Text>
         </View>
 
-        <View style={styles.section}>
-          <Text>
-            <Text style={styles.label}>Técnica: </Text>
-            {data.technique?.join(", ") || "—"}
-          </Text>
-        </View>
-
-        {data.findings?.length ? (
+        {data.findings?.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.label}>Achados:</Text>
             {data.findings.map((f, i) => {
-              const size =
-                [f.size_mm.long, f.size_mm.short]
-                  .filter(Boolean)
-                  .join(" x ") || "—";
-              const extra = f.additional?.length
-                ? `; adicionais: ${f.additional.join(", ")}`
-                : "";
-              return (
-                <Text key={i} style={styles.listItem}>
-                  {i + 1}. {f.type} em {f.site}; margens {f.margins}; densidade{" "}
-                  {f.density}; medidas {size}
-                  {extra}.
-                </Text>
-              );
+              const size = [f.size_mm?.long, f.size_mm?.short].filter(Boolean).join(" x ") || "—";
+              const extra = f.additional?.length ? `; adicionais: ${f.additional.join(", ")}` : "";
+              const line = `Achado ${i + 1}: ${f.type} em ${f.site}; margens ${f.margins}; densidade ${f.density}; medidas ${size} mm${extra}.`;
+              return <Text key={i} style={styles.listItem}>• {line}</Text>;
             })}
           </View>
-        ) : null}
+        )}
 
-        {data.ancillary?.length ? (
+        {data.impression?.length > 0 && (
           <View style={styles.section}>
-            <Text>
-              <Text style={styles.label}>Achados acessórios: </Text>
-              {data.ancillary.filter(Boolean).join(", ")}
-            </Text>
+            <Text><Text style={styles.label}>Impressão: </Text>{data.impression.join("; ")}</Text>
           </View>
-        ) : null}
-
-        {data.comparison?.priorDate ? (
+        )}
+        
+        {data.recommendations?.length > 0 && (
           <View style={styles.section}>
-            <Text>
-              <Text style={styles.label}>Comparação: </Text>
-              {data.comparison.priorDate} → {data.comparison.change}
-            </Text>
+            <Text><Text style={styles.label}>Recomendações: </Text>{data.recommendations.join("; ")}</Text>
           </View>
-        ) : null}
-
-        {data.impression?.length ? (
-          <View style={styles.section}>
-            <Text>
-              <Text style={styles.label}>Impressão: </Text>
-              {data.impression.filter(Boolean).join("; ")}
-            </Text>
-          </View>
-        ) : null}
-
-        {data.recommendations?.length ? (
-          <View style={styles.section}>
-            <Text>
-              <Text style={styles.label}>Recomendações: </Text>
-              {data.recommendations.filter(Boolean).join("; ")}
-            </Text>
-          </View>
-        ) : null}
+        )}
       </Page>
     </Document>
   );

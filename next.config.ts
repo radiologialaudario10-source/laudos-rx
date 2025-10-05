@@ -1,12 +1,13 @@
-// next.config.ts
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  // Não deixe o ESLint travar o build (especialmente na Vercel)
-  eslint: { ignoreDuringBuilds: true },
-
-  // Mantemos TypeScript como bloqueador de erros (boa prática)
-  typescript: { ignoreBuildErrors: false },
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  // Ignora erros de ESLint durante o build da Vercel para não travar o deploy
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  // Mantém a verificação de tipos do TypeScript, que é mais importante
+  typescript: {
+    ignoreBuildErrors: false,
+  },
 };
 
 export default nextConfig;
