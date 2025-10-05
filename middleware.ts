@@ -1,8 +1,10 @@
-// AQUI ESTÁ A CORREÇÃO: trocamos "@/auth" por "./auth"
-// Isso diz: "procure o arquivo auth.ts na mesma pasta que eu"
-export { auth as middleware } from "./auth"
+// Importamos a função 'auth' usando o atalho padrão
+import { auth } from "@/auth";
 
+// Exportamos a função 'auth' com o nome 'middleware'
+export const middleware = auth;
+
+// A configuração de quais rotas proteger continua a mesma
 export const config = {
-  // A regra para proteger a rota /editor continua a mesma
   matcher: ["/editor"],
-}
+};

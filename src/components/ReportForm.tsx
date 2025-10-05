@@ -28,6 +28,7 @@ export default function ReportForm({
     reset,
     watch,
     formState: { errors, isValid },
+    previewRef = useRef<HTMLDivElement>(null)
   } = useForm<CtToraxInput>({
     resolver: zodResolver(ctToraxSchema),
     defaultValues: fallback as DefaultValues<CtToraxInput>,
@@ -49,6 +50,31 @@ export default function ReportForm({
     saveDraft(storageKey, formData);
   }, [formData, storageKey]);
 
+  const onSubmit = async (data: CtToraxInput) => {
+      try {
+        const response = await fetch('/api/reports', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+          const errorBody = await response.json();
+          throw new Error(errorBody.error || 'Falha ao salvar o laudo no servidor');
+        }
+
+        const result = await response.json();
+        console.log('Laudo salvo com sucesso!', result);
+        alert(`Laudo salvo com sucesso! ID do Laudo: ${result.id}`);
+
+      } catch (error) {
+        console.error(error);
+        alert(`Ocorreu um erro ao salvar o laudo: ${error.message}`);
+      }
+    };
+
   const narrative = useMemo(() => {
     const d = formData;
     const lines: string[] = [];
@@ -63,59 +89,40 @@ export default function ReportForm({
     return lines.join("\n\n");
   }, [formData]);
 
-  const onSubmit = (data: CtToraxInput) => {
-    alert("Validação OK. Formulário pronto para ser salvo ou exportado.");
-    console.log("Dados validados:", ctToraxSchema.parse(data));
-  };
-
-  const [isDownloading, setIsDownloading] = useState(false);
-  const previewRef = useRef<HTMLDivElement>(null);
-
-  const handleDownloadPdf = async () => {
-    if (!isValid) return;
-    setIsDownloading(true);
-    try {
-      const parsedData = ctToraxSchema.parse(formData);
-      
-      try {
-        const ReactPDF = await import("@react-pdf/renderer");
-        const blob = await ReactPDF.pdf(<PdfReport data={parsedData} />).toBlob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `laudo-${parsedData.patient?.id || "sem-id"}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-        return;
-      } catch (e) {
-        console.warn("Falha no react-pdf, usando fallback html2pdf.js", e);
-      }
-
-      const html2pdf = (await import("html2pdf.js")).default;
-      if (!previewRef.current) throw new Error("Preview não encontrado");
-      await html2pdf().from(previewRef.current).set({ margin: 10, filename: `laudo.pdf` }).save();
-
-    } catch (error) {
-      console.error("Erro ao gerar PDF:", error);
-      alert("Ocorreu um erro ao gerar o PDF. Verifique o console.");
-    } finally {
-      setIsDownloading(false);
-    }
-  };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="grid md:grid-cols-2 gap-8">
       {/* Coluna Esquerda: Formulário */}
       <div className="space-y-4">
-        <div>
-          <h2 className="font-semibold mb-2">Dados do Paciente</h2>
-          <div className="grid grid-cols-3 gap-2">
-            <input {...register("patient.age")} className="border p-2 rounded" placeholder="Idade" />
-            <input {...register("patient.sex")} className="border p-2 rounded" placeholder="Sexo" />
-            <input {...register("patient.id")} className="border p-2 rounded" placeholder="ID do Paciente" />
-          </div>
-          {(errors.patient?.age || errors.patient?.sex) && <p className="text-red-500 text-sm mt-1">{errors.patient.age?.message || errors.patient.sex?.message}</p>}
+        <div className="flex items-center justify-between">
+            <h2 className="font-semibold">Dados do Paciente</h2>
+            <div className="flex gap-2">
+                <button type="button" className="text-sm p-2 border rounded" onClick={() => {
+                    const exampleData: CtToraxInput = {
+                        patient: { age: "45", sex: "Feminino", id: "PAC-001" },
+                        indication: "Tosse persistente",
+                        technique: ["Multislice", "Sem contraste"],
+                        findings: [
+                            { site: "Lobo inferior esquerdo", type: "Consolidação", size_mm: { long: "30", short: "25" } }
+                        ],
+                        impression: ["Consolidação sugestiva de processo infeccioso."],
+                    };
+                    reset(exampleData);
+                }}>
+                    Preencher Exemplo
+                </button>
+                <button type="button" className="text-sm p-2 border rounded" onClick={() => reset(fallback as DefaultValues<CtToraxInput>)}>
+                    Limpar
+                </button>
+            </div>
         </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          <input {...register("patient.age")} className="border p-2 rounded" placeholder="Idade" />
+          <input {...register("patient.sex")} className="border p-2 rounded" placeholder="Sexo" />
+          <input {...register("patient.id")} className="border p-2 rounded" placeholder="ID do Paciente" />
+        </div>
+        {(errors.patient?.age || errors.patient?.sex) && <p className="text-red-500 text-sm mt-1">{errors.patient.age?.message || errors.patient.sex?.message}</p>}
 
         <div>
           <h2 className="font-semibold mb-2">Indicação Clínica</h2>
@@ -140,18 +147,14 @@ export default function ReportForm({
           </div>
           <button type="button" onClick={() => append({ site: "", type: "Nódulo" })} className="bg-gray-200 px-3 py-2 rounded mt-2 text-sm">+ Adicionar Achado</button>
         </div>
-        
-        <button type="submit" disabled={!isValid} className="mt-4 w-full bg-blue-600 text-white p-2 rounded disabled:opacity-50">Validar Laudo</button>
+
+        <button type="submit" disabled={!isValid} className="mt-4 w-full bg-blue-600 text-white p-2 rounded disabled:opacity-50">Salvar Laudo no Banco</button>
       </div>
 
       {/* Coluna Direita: Preview e Ações */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
             <h2 className="font-semibold">Pré-visualização</h2>
-            <div className="flex gap-2">
-                <button type="button" onClick={() => window.print()} disabled={!isValid} className="no-print text-sm p-2 border rounded disabled:opacity-50">Imprimir</button>
-                <button type="button" onClick={handleDownloadPdf} disabled={!isValid || isDownloading} className="no-print text-sm p-2 border rounded disabled:opacity-50">{isDownloading ? "Gerando..." : "Baixar PDF"}</button>
-            </div>
         </div>
         <div ref={previewRef} className="border rounded p-4 bg-white min-h-[400px] text-sm leading-relaxed whitespace-pre-wrap print:p-0">
             <h3 className="font-bold text-base mb-4">Laudo de {formData.studyArea || "Tomografia"}</h3>
