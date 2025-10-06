@@ -1,44 +1,57 @@
 // src/app/api/reports/route.ts
-import { auth } from "@/auth"
-import prisma from "@/lib/prisma"
-import { NextResponse } from "next/server"
-import { ctToraxSchema } from "@/models/ct_torax.schema"
+import { NextResponse } from "next/server";
+import { mkdir, writeFile } from "fs/promises";
+import path from "path";
 
-export async function POST(request: Request) {
-  console.log("\n--- NOVA REQUISIÇÃO PARA /api/reports ---");
-  const session = await auth();
+export const runtime = "nodejs"; // garante Node runtime (fs disponível)
+export const dynamic = "force-dynamic"; // evita cache de rota
 
-  // VAMOS VER O QUE ESTÁ DENTRO DA SESSÃO
-  console.log("SESSÃO OBTIDA NA API:", JSON.stringify(session, null, 2));
+type Body = {
+  html?: string;
+  template?: string;
+};
 
-  if (!session?.user?.id) {
-    console.error("ERRO: Sessão não encontrada ou sem user.id. Acesso negado.");
-    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+function getBaseDir() {
+  // Em produção (Vercel): /tmp
+  // Em dev: <root>/tmp/reports
+  if (process.env.NODE_ENV === "production") {
+    return "/tmp/reports";
   }
+  return path.join(process.cwd(), "tmp", "reports");
+}
 
-  console.log(`SUCESSO: Sessão válida para o usuário ID: ${session.user.id}`);
-
-  const data = await request.json();
-
+export async function POST(req: Request) {
   try {
-    const validatedData = ctToraxSchema.parse(data);
+    const { html, template }: Body = await req.json().catch(() => ({}));
+    if (typeof html !== "string" || !html.trim()) {
+      return NextResponse.json(
+        { error: "HTML vazio ou ausente" },
+        { status: 400 }
+      );
+    }
 
-    const newReport = await prisma.report.create({
-      data: {
-        patientId: validatedData.patient.id,
-        patientSex: validatedData.patient.sex,
-        patientAge: validatedData.patient.age,
-        indication: validatedData.indication,
-        technique: validatedData.technique,
-        findings: validatedData.findings,
-        impression: validatedData.impression,
-        authorId: session.user.id,
-      },
-    });
+    const id =
+      (globalThis as any).crypto?.randomUUID?.() ??
+      // fallback simples
+      `rep_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    return NextResponse.json(newReport, { status: 201 });
-  } catch (error) {
-    console.error("Erro ao criar o laudo:", error);
-    return NextResponse.json({ error: "Dados inválidos ou erro no servidor" }, { status: 400 });
+    const dir = getBaseDir();
+    await mkdir(dir, { recursive: true });
+
+    // arquivo .html com o seu conteúdo
+    const filePath = path.join(dir, `${id}.html`);
+    await writeFile(
+      filePath,
+      `<!-- template: ${template || "-"} -->\n${html}`,
+      "utf8"
+    );
+
+    return NextResponse.json({ id }, { status: 200 });
+  } catch (e: any) {
+    console.error("[/api/reports] ERRO:", e?.message || e);
+    return NextResponse.json(
+      { error: e?.message ?? "Falha ao salvar" },
+      { status: 500 }
+    );
   }
 }
